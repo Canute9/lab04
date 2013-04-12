@@ -1,0 +1,211 @@
+#include "sysinclude.h"
+#include<iostream>
+#include<deque>
+using namespace std;
+
+extern void SendFRAMEPacket(unsigned char* pData, unsigned int len);
+
+#define WINDOW_SIZE_STOP_WAIT 1
+#define WINDOW_SIZE_BACK_N_FRAME 4
+
+typedef enum {data,ack,nak} frame_kind;
+typedef struct frame{
+  frame_kind kind;//帧类型
+	unsigned int seq;//序列号
+	unsigned int ack;//确认号
+	unsigned char data[100];//数据
+};
+typedef struct element{//队列元素
+	frame *pframe;
+	unsigned int len;
+};
+
+deque<element> win_deque;
+deque<element> win_deque1;
+bool isfull = false;
+int num_win=0;
+int num_win1=0;
+/*
+* 停等协议测试函数
+*/
+int stud_slide_window_stop_and_wait(char *pBuffer, int bufferSize, UINT8 messageType)
+{
+	//int num_element=0;
+	int seq;
+	int ack;
+	element temp;
+	
+	if(messageType == MSG_TYPE_TIMEOUT){
+		//printf("timeout:");
+		//printf("%s\n",pBuffer);
+		seq=ntohl(*(unsigned int *)pBuffer);
+		temp = win_deque.front();
+		if(seq==(*temp.pframe).seq){
+			SendFRAMEPacket((unsigned char*)temp.pframe,temp.len);
+		}
+	}
+	else if(messageType == MSG_TYPE_SEND){
+		//printf("send\n");
+		//printf("%s\n",pBuffer);
+		temp.pframe = new frame;
+		(*temp.pframe)=*(frame *)pBuffer;
+		temp.len=bufferSize;
+		win_deque.push_back(temp);
+		if(!isfull){
+			temp=win_deque.front();
+			SendFRAMEPacket((unsigned char*)temp.pframe,temp.len);
+			isfull=true;
+		}
+	}
+	else if(messageType == MSG_TYPE_RECEIVE){
+		//printf("receive:");
+		//printf("%s\n",pBuffer);
+		ack = ntohl(((frame *)pBuffer)->ack);
+		if(win_deque.size()!=0){
+			temp=win_deque.front();
+			if(ntohl(temp.pframe->seq) == ack){
+				win_deque.pop_front();
+				temp=win_deque.front();
+				SendFRAMEPacket((unsigned char*)temp.pframe,temp.len);
+			}
+		}
+		else
+			isfull=true;
+	}
+	
+	return 0;
+}
+
+/*
+* 回退n帧测试函数
+*/
+int stud_slide_window_back_n_frame(char *pBuffer, int bufferSize, UINT8 messageType)
+{	
+	unsigned int seq,ack;
+	int i,j;
+	element temp;
+	if(messageType == MSG_TYPE_TIMEOUT){
+		printf("enter timeout\n");
+		/*seq=ntohl(*(unsigned int *)pBuffer);
+		for(i=0;i<win_deque.size() && i<WINDOW_SIZE_BACK_N_FRAME;i++){
+			temp=win_deque[i];
+			if((*temp.pframe).seq == seq){
+				break;
+			}
+		}*/
+		printf("num:%d\n",win_deque.size());
+		printf("win_num:%d\n",num_win);
+		for(j=0;j<WINDOW_SIZE_BACK_N_FRAME && j<win_deque.size();j++){
+			temp=win_deque[j];
+			printf("resend\n");
+			SendFRAMEPacket((unsigned char *)(temp.pframe),temp.len);
+		}
+	}
+	else if(messageType == MSG_TYPE_SEND){
+		printf("enter send\n");
+		temp.pframe=new frame;
+		(*temp.pframe)=*(frame *)pBuffer;
+		temp.len=bufferSize;
+		win_deque.push_back(temp);
+		if(num_win < WINDOW_SIZE_BACK_N_FRAME){
+			temp=win_deque.back();
+			printf("send\n");
+			SendFRAMEPacket((unsigned char *)(temp.pframe),temp.len);
+			num_win++;
+		}
+	}
+	else if(messageType == MSG_TYPE_RECEIVE){
+		printf("enter receive\n");
+		ack=((frame *)pBuffer)->ack;
+		printf("ack%d\n",ntohl(ack));
+		for(i=0;i<win_deque.size();i++){// && i<WINDOW_SIZE_BACK_N_FRAME;			
+			if(win_deque.front().pframe->seq == ack){
+				win_deque.pop_front();
+				num_win--;
+				break;
+			}
+			win_deque.pop_front();
+			num_win--;
+		}
+		
+		for (j=num_win;j < win_deque.size() && num_win < WINDOW_SIZE_BACK_N_FRAME; j++) {//j< WINDOW_SIZE_BACK_N_FRAME && 
+			temp = win_deque[j];
+			printf("send\n");
+			SendFRAMEPacket((unsigned char *)(temp.pframe),temp.len);
+			num_win++;
+		}
+	}
+	return 0;
+}
+
+/*
+* 选择性重传测试函数
+*/
+int stud_slide_window_choice_frame_resend(char *pBuffer, int bufferSize, UINT8 messageType)
+{
+	unsigned int seq,myack;
+	int i,j;
+	element temp;
+	if(messageType == MSG_TYPE_TIMEOUT){
+		printf("enter timeout\n");
+		/*seq=ntohl(*(unsigned int *)pBuffer);
+		for(i=0;i<win_deque1.size() && i<WINDOW_SIZE_BACK_N_FRAME;i++){
+			temp=win_deque1[i];
+			if((*temp.pframe).seq == seq){
+				break;
+			}
+		}*/
+		printf("num:%d\n",win_deque1.size());
+		printf("win_num:%d\n",num_win1);
+		for(j=0;j<WINDOW_SIZE_BACK_N_FRAME && j<win_deque1.size();j++){
+			temp=win_deque1[j];
+			printf("resend\n");
+			SendFRAMEPacket((unsigned char *)(temp.pframe),temp.len);
+		}
+	}
+	else if(messageType == MSG_TYPE_SEND){
+		printf("enter send\n");
+		temp.pframe=new frame;
+		(*temp.pframe)=*(frame *)pBuffer;
+		temp.len=bufferSize;
+		win_deque1.push_back(temp);
+		if(num_win1 < WINDOW_SIZE_BACK_N_FRAME){
+			temp=win_deque1.back();
+			printf("send\n");
+			SendFRAMEPacket((unsigned char *)(temp.pframe),temp.len);
+			num_win1++;
+		}
+	}
+	else if(messageType == MSG_TYPE_RECEIVE){
+		printf("enter receive\n");
+		myack=((frame *)pBuffer)->ack;
+		printf("ack%d\n",ntohl(myack));
+		if(ntohl(((frame *)pBuffer)->kind) == ack){
+			for(i=0;i<win_deque1.size();i++){// && i<WINDOW_SIZE_BACK_N_FRAME;			
+				if(win_deque1.front().pframe->seq == myack){
+					win_deque1.pop_front();
+					num_win1--;
+					break;
+				}
+				win_deque1.pop_front();
+				num_win1--;
+			}
+			
+			for (j=num_win1;j < win_deque1.size() && num_win1 < WINDOW_SIZE_BACK_N_FRAME; j++) { 
+				temp = win_deque1[j];
+				printf("send\n");
+				SendFRAMEPacket((unsigned char *)(temp.pframe),temp.len);
+				num_win1++;
+			}
+		}
+		else if(ntohl(((frame *)pBuffer)->kind) == nak){
+			for(i=0;i<win_deque1.size();i++){// && i<WINDOW_SIZE_BACK_N_FRAME;			
+				if(win_deque1[i].pframe->seq == myack){
+					SendFRAMEPacket((unsigned char *)(win_deque1[i].pframe),win_deque1[i].len);
+					break;
+				}
+			}
+		}
+	}
+	return 0;
+}
